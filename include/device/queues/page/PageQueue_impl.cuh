@@ -113,6 +113,8 @@ __forceinline__ __device__ void* PageQueue<ChunkType>::allocPage(MemoryManagerTy
 	uint32_t chunk_index;
 	auto pages_per_chunk = MemoryManagerType::QI::getPagesPerChunkFromQueueIndex(queue_index_);
 
+    //printf("%s:%d\n", __FILE__, __LINE__);
+
 	semaphore.wait(1, pages_per_chunk, [&]()
 	{
 		if (!memory_manager->allocateChunk<false>(chunk_index))

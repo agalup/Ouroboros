@@ -39,7 +39,9 @@ __forceinline__ __device__ void BulkSemaphore::wait(int N, uint32_t number_pages
 			}
 			// Increment count again
 			atomicAdd(&value, N);
-		}	
+		
+        }	
+        __threadfence();
 
 		BulkSemaphore old_semaphore_value;
 		int expected, reserved, count;
@@ -74,6 +76,8 @@ __forceinline__ __device__ void BulkSemaphore::wait(int N, uint32_t number_pages
 			// Try to set new value
 		} while ((new_semaphore_value.value = atomicCAS(&value, old_semaphore_value.value, new_semaphore_value.value))
 			!= old_semaphore_value.value);
+        
+        __threadfence();
 
 		// ##############################################
 		// Return if chunk allocation or page allocation
@@ -108,7 +112,10 @@ __forceinline__ __device__ void BulkSemaphore::wait(int N, uint32_t number_pages
 			// Reduce reserved count
 			atomicAdd(&value, create64BitSubAdder_reserved(N));
 		}
+        __threadfence();
 	}
+
+    __threadfence();
 }
 #else
 // ##############################################################################################################################################
@@ -130,6 +137,7 @@ __forceinline__ __device__ void BulkSemaphore::wait(int N, uint32_t number_pages
 		int num = __popc(mask) * N; // How much should our allocator allocate?
 		while(true)
 		{
+
 			if(getCount() - static_cast<int>(num) >= 0)
 			{
 				uint32_t atomic_ret_val = atomicAdd(&value, Ouro::create2Complement(num)) & highest_value_mask; // Try to decrement global count first
@@ -143,6 +151,8 @@ __forceinline__ __device__ void BulkSemaphore::wait(int N, uint32_t number_pages
 				// Increment count again
 				atomicAdd(&value, num);
 			}
+
+            __threadfence();
 			
 			BulkSemaphore old_semaphore_value;
 			int expected, reserved, count;
@@ -179,6 +189,8 @@ __forceinline__ __device__ void BulkSemaphore::wait(int N, uint32_t number_pages
 			while ((new_semaphore_value.value = atomicCAS(&value, old_semaphore_value.value, new_semaphore_value.value))
 			!= old_semaphore_value.value);
 
+            __threadfence();
+
 			if (mode == Mode::AllocatePage)
 				break;
 
@@ -210,10 +222,12 @@ __forceinline__ __device__ void BulkSemaphore::wait(int N, uint32_t number_pages
 				// Reduce reserved count
 				atomicAdd(&value, create64BitSubAdder_reserved(num));
 			}
+            __threadfence();
 		}
 	}
 	// Gather all threads around -> wait for the leader to finish
 	__syncwarp(mask);
+    __threadfence();
 }
 #endif
 

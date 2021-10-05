@@ -165,6 +165,8 @@ void Ouroboros<OUROBOROS, OUROBOROSES...>::initialize(size_t instantiation_size,
 	memory.additionalSizeBeginning = additionalSizeBeginning;
 	memory.additionalSizeEnd = additionalSizeEnd;
 
+    printf("memory size to cudaMalloc %lld\n", memory.allocationSize);
+
 	// Allocate memory
 	if (!memory.d_memory)
 		cudaMalloc(reinterpret_cast<void**>(&memory.d_memory), memory.allocationSize);

@@ -52,6 +52,7 @@ __forceinline__ __device__ void* OuroborosPages<QUEUE_TYPE, CHUNK_BASE, SMALLEST
 {
 	if(statistics_enabled)
 		atomicAdd(&stats.pageAllocCount, 1);
+    __threadfence();
 
 	// Allocate from pages
 	return d_storage_reuse_queue[QI::getQueueIndex(size)].template allocPage<OuroborosPages<QUEUE_TYPE, CHUNK_BASE, SMALLEST_SIZE, NUMBER_QUEUES>>(this);
