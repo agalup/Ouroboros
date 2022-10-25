@@ -195,7 +195,7 @@ int main(int argc, char* argv[])
 
 	#endif
 
-	size_t instantitation_size = 6 * 1024ULL * 1024ULL * 1024ULL;
+	size_t instantitation_size = 7 * 1024ULL * 1024ULL * 1024ULL;
 	MemoryManagerType memory_manager;
 	memory_manager.initialize(instantitation_size);
 
@@ -270,7 +270,7 @@ int main(int argc, char* argv[])
     }else if (num_alloc_per_sec/(1000*1000) > 0){
         std::cout << "# allocations per sec: " << num_alloc_per_sec/1000000 << "M" << std::endl;
     }else if (num_alloc_per_sec/1000 > 0){
-        std::cout << "# allocations per sec: " << num_alloc_per_sec/1000 << std::endl;
+        std::cout << "# allocations per sec: " << num_alloc_per_sec/1000 << "K" << std::endl;
     }else{
         std::cout << "# allocations per sec: " << num_alloc_per_sec << std::endl;
     }
