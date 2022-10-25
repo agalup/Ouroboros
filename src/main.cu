@@ -1,9 +1,11 @@
 #include <iostream>
-
+#include <cassert>
 #include "device/Ouroboros_impl.cuh"
 #include "device/MemoryInitialization.cuh"
 #include "InstanceDefinitions.cuh"
 #include "Utility.h"
+
+#include "cuda.h"
 
 #define TEST_MULTI
 
@@ -15,6 +17,7 @@ __global__ void d_testAllocation(MemoryManagerType* mm, int** verification_ptr, 
 		return;
 
 	verification_ptr[tid] = reinterpret_cast<int*>(mm->malloc(allocation_size));
+    assert(verification_ptr[tid]);
 }
 
 
@@ -22,16 +25,34 @@ __global__ void d_testAllocation(MemoryManagerType* mm, int** verification_ptr, 
 template <typename MemoryManagerType>
 __global__ void d_test_warp_Allocation(MemoryManagerType* mm, int** verification_ptr, int num_allocations, int allocation_size)
 {
+    assert(mm);
+    assert(verification_ptr);
 	int tid = threadIdx.x + blockIdx.x * blockDim.x;
 	if(tid >= num_allocations)
 		return;
 
-    if ((threadIdx.x % 32) == 0)
+    if ((threadIdx.x % 32) == 0){
+        //printf("thid %d malloc %d\n", tid, 32 * allocation_size);
 	    verification_ptr[tid] = reinterpret_cast<int*>(mm->malloc(32 * allocation_size));
+        assert(verification_ptr[tid]);
+    }
 
     __syncthreads();
-    verification_ptr[tid] = reinterpret_cast<int*>(reinterpret_cast<char*>(verification_ptr[(threadIdx.x/32)*32]) +
-    ((threadIdx.x%32) * allocation_size));
+    __threadfence();
+
+    int base = (blockIdx.x * blockDim.x) + ((threadIdx.x/32)*32);
+    int offset = ((threadIdx.x % 32) * allocation_size);
+    assert(offset < 32 * allocation_size);
+    assert(base >= 0);
+    assert(base <= ((blockIdx.x + 1) * blockDim.x) - 32);
+    //printf("thid %d assign %d and offset %d\n", tid, base, offset);
+    verification_ptr[tid] = reinterpret_cast<int*>(reinterpret_cast<char*>(verification_ptr[base]) + offset);
+
+    __syncthreads();
+    __threadfence();
+    assert(verification_ptr[tid]);
+
+    __threadfence();
 }
 
 __global__ void d_testWriteToMemory(int** verification_ptr, int num_allocations, int allocation_size)
@@ -39,8 +60,9 @@ __global__ void d_testWriteToMemory(int** verification_ptr, int num_allocations,
 	int tid = threadIdx.x + blockIdx.x * blockDim.x;
 	if(tid >= num_allocations)
 		return;
-	
+
 	auto ptr = verification_ptr[tid];
+    assert(ptr);
 
 	for(auto i = 0; i < (allocation_size / sizeof(int)); ++i)
 	{
@@ -88,7 +110,7 @@ __global__ void d_test_warp_Free(MemoryManagerType* mm, int** verification_ptr, 
 	if(tid >= num_allocations)
 		return;
 
-    if (threadIdx.x % 32 == 0)
+    if ((threadIdx.x % 32) == 0)
 	    mm->free(verification_ptr[tid]);
 }
 
@@ -98,6 +120,7 @@ int main(int argc, char* argv[])
 	int num_allocations {10000};
 	int allocation_size_byte {16};
 	int num_iterations {10};
+	//int num_iterations {1};
 	int blockSize {256};
     int allthreads {1};
 	if(argc >= 2){
@@ -172,15 +195,15 @@ int main(int argc, char* argv[])
 
 	#endif
 
-	size_t instantitation_size = 4 * 1024ULL * 1024ULL * 1024ULL;
+	size_t instantitation_size = 6 * 1024ULL * 1024ULL * 1024ULL;
 	MemoryManagerType memory_manager;
 	memory_manager.initialize(instantitation_size);
 
 	int** d_memory{nullptr};
 	HANDLE_ERROR(cudaMalloc(&d_memory, sizeof(int*) * num_allocations));
-    printf("num_allocations %d\n", num_allocations * sizeof(int*));
 
 	int gridSize {Ouro::divup(num_allocations, blockSize)};
+    std::cout << "Block size " << blockSize << ", Grid size " << gridSize << std::endl;
 	float timing_allocation{0.0f};
 	float timing_free{0.0f};
 	cudaEvent_t start, end;
@@ -188,22 +211,40 @@ int main(int argc, char* argv[])
 	{
 		start_clock(start, end);
 
+		HANDLE_ERROR(cudaPeekAtLastError());
+		HANDLE_ERROR(cudaDeviceSynchronize());
+
+        auto dev_mm = memory_manager.getDeviceMemoryManager();
+        void* args[] = {&dev_mm, &d_memory, &num_allocations, &allocation_size_byte};
+
         if (allthreads){
-		    d_testAllocation <MemoryManagerType> <<<gridSize, blockSize>>>(memory_manager.getDeviceMemoryManager(), d_memory, num_allocations, allocation_size_byte);
+            d_testAllocation <MemoryManagerType> <<<gridSize, blockSize>>>(memory_manager.getDeviceMemoryManager(), d_memory, num_allocations, allocation_size_byte);
+
+            fflush(stdout);
+            HANDLE_ERROR(cudaPeekAtLastError());
+            HANDLE_ERROR(cudaDeviceSynchronize());
         }else{
-		    d_test_warp_Allocation <MemoryManagerType> <<<gridSize, blockSize>>>(memory_manager.getDeviceMemoryManager(), d_memory, num_allocations, allocation_size_byte);
+            //HANDLE_ERROR(cudaLaunchKernel((void*)d_test_warp_Allocation<MemoryManagerType>, gridSize, blockSize, args, 0, 0));
+            d_test_warp_Allocation <MemoryManagerType> <<<gridSize, blockSize>>>(memory_manager.getDeviceMemoryManager(), d_memory, num_allocations, allocation_size_byte);
+            fflush(stdout);
+            HANDLE_ERROR(cudaPeekAtLastError());
+            HANDLE_ERROR(cudaDeviceSynchronize());
         }
+
 
 		timing_allocation += end_clock(start, end);
 
+		HANDLE_ERROR(cudaPeekAtLastError());
 		HANDLE_ERROR(cudaDeviceSynchronize());
 
 		d_testWriteToMemory<<<gridSize, blockSize>>>(d_memory, num_allocations, allocation_size_byte);
 
+		HANDLE_ERROR(cudaPeekAtLastError());
 		HANDLE_ERROR(cudaDeviceSynchronize());
 
 		d_testReadFromMemory<<<gridSize, blockSize>>>(d_memory, num_allocations, allocation_size_byte);
 
+		HANDLE_ERROR(cudaPeekAtLastError());
 		HANDLE_ERROR(cudaDeviceSynchronize());
 
 		start_clock(start, end);
